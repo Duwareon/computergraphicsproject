@@ -1,18 +1,18 @@
-extern crate minifb;
 mod text;
 
-use text::Font;
+use log::error;
+use pixels::{Error, Pixels, SurfaceTexture};
+use winit::dpi::LogicalSize;
+use winit::event::{Event, VirtualKeyCode};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;
+use winit_input_helper::WinitInputHelper;
+
 use std::time::Instant;
+use text::Font;
 
-use minifb::{Key, Window, WindowOptions};
-
-const WIDTH: usize = 512;
-const HEIGHT: usize = 512;
-
-fn from_u8_rgb(col: [u8; 3]) -> u32 {
-    let (r, g, b) = (col[0] as u32, col[1] as u32, col[2] as u32);
-    (r << 16) | (g << 8) | b
-}
+const WIDTH: u32 = 512;
+const HEIGHT: u32 = 512;
 
 fn interpolate(i0: u32, d0: f32, i1: u32, d1: f32) -> Vec<u32> {
     if i0 == i1 {
@@ -28,56 +28,49 @@ fn interpolate(i0: u32, d0: f32, i1: u32, d1: f32) -> Vec<u32> {
     return values;
 }
 
+#[derive(Clone)]
 struct Buffer {
-    buf: Vec<u32>,
+    buf: Vec<u8>,
     defaultfont: Font,
 }
 
 impl Buffer {
-    pub fn new(buf: Vec<u32>, defaultfont: Font) -> Self {
-        Buffer { buf: buf, defaultfont: defaultfont }
+    pub fn new(buf: Vec<u8>, defaultfont: Font) -> Self {
+        Buffer {
+            buf: buf,
+            defaultfont: defaultfont,
+        }
     }
 
     #[allow(dead_code)]
-    pub fn into_vec(&mut self) -> &Vec<u32> {
+    pub fn into_vec(&mut self) -> &Vec<u8> {
         return &self.buf;
     }
 
-    pub fn into_vec_mut(&mut self) -> &mut Vec<u32> {
+    pub fn into_vec_mut(&mut self) -> &mut Vec<u8> {
         return &mut self.buf;
     }
 
     pub fn put_pixel(&mut self, x: u32, y: u32, col: [u8; 3]) {
-        let index: usize = (x + y * WIDTH as u32) as usize;
-        self.buf[index] = from_u8_rgb(col);
+        let index: usize = ((x + y * WIDTH) * 4) as usize;
+        self.buf[index] = col[0];
+        self.buf[index + 1] = col[1];
+        self.buf[index + 2] = col[2];
+        self.buf[index + 3] = 0xff;
     }
 
     pub fn clear(&mut self, col: [u8; 3]) {
-        let mut clearedbuf: Vec<u32> = vec!();
-        let rgbcol = from_u8_rgb(col);
-
-
-        for _ in 0..self.buf.len() {
-            clearedbuf.append(&mut vec![rgbcol]);
+        for pixel in self.buf.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[col[0], col[1], col[2], 0xff]);
         }
-
-        self.buf = clearedbuf;
     }
 
-    pub fn draw_text(&mut self, text: &str, font: Font, x: u32, y:u32, col: [u8; 3]) {
+    pub fn draw_text(&mut self, text: &str, font: Font, x: u32, y: u32, col: [u8; 3]) {
         // Loop through the characters in the text
-        for i in text.char_indices(){
-            let glyph = font.clone().shape_char(i.1);
-
-            // Loop through the lines in the character
-            for j in glyph.clone().into_iter().enumerate() {
-
-                // Loop through the pixels in the line
-                for k in j.1.char_indices() {
-                    if k.1 == '1' {
-                        self.put_pixel(x+(k.0 + i.0*6) as u32, y+j.0 as u32, col);
-                    }
-                }
+        for (i, character) in text.char_indices() {
+            // loop through pixels in glyph
+            for (_, loc) in font.clone().shape_char(character).into_iter().enumerate() {
+                self.put_pixel(loc[0] as u32 + x + i as u32 * 6, loc[1] as u32 + y, col);
             }
         }
     }
@@ -91,17 +84,15 @@ impl Buffer {
         xoff: f32,
         yoff: f32,
     ) {
-        for i in 0..WIDTH as u32 {
+        for i in 0..WIDTH {
             let xoff = xoff + (WIDTH / 2) as f32;
             let yoff = yoff + (HEIGHT / 2) as f32;
 
             let j = yoff - (f((i as f32 - xoff) / xscale) * yscale);
 
-            self.put_pixel(i, (j as u32).min(HEIGHT as u32 - 1), col);
+            self.put_pixel(i, (j as u32).min(HEIGHT - 1), col);
         }
     }
-
-    
 
     pub fn draw_line(&mut self, p0: [u32; 2], p1: [u32; 2], col: [u8; 3]) {
         let mut p0 = p0;
@@ -139,8 +130,6 @@ impl Buffer {
     }
 
     fn draw_test(&mut self) {
-        self.clear([0x00; 3]);
-
         self.put_pixel(10, 10, [0xff, 0x80, 0x00]);
 
         let func = |i: f32| -> f32 {
@@ -157,46 +146,92 @@ impl Buffer {
         self.draw_line([150, 400], [400, 300], [0xff, 0x00, 0x80]);
         self.draw_wire_tri([200, 300], [400, 400], [200, 200], [0x80, 0x80, 0xff]);
 
-        //self.draw_text("poggers! Holy F*@#ING sh1t.", self.defaultfont.clone(),100, 100, [0xff; 3]);
+        self.draw_text(
+            "Poggers! Wowee!",
+            self.defaultfont.clone(),
+            100,
+            100,
+            [0xff; 3],
+        );
+        self.draw_text(
+            "'.@\"#$^&*()",
+            self.defaultfont.clone(),
+            100,
+            120,
+            [0xff; 3],
+        );
     }
 
     pub fn draw(&mut self) {
-        self.draw_test()
+        self.clear([0x00; 3]);
+        self.draw_test();
     }
 }
 
-fn main() -> std::io::Result<()> {
-    let mut buffer: Buffer = Buffer::new(vec![0; WIDTH * HEIGHT], Font::new(Font::format("scientifica-11.bdf")));
+fn main() -> Result<(), Error> {
+    env_logger::init();
+    let event_loop = EventLoop::new();
+    let mut input = WinitInputHelper::new();
+    let window = {
+        let size = LogicalSize::new(WIDTH as f64, HEIGHT as f64);
+        WindowBuilder::new()
+            .with_title("Pogging my pants")
+            .with_inner_size(size)
+            .with_resizable(false)
+            .build(&event_loop)
+            .unwrap()
+    };
 
-    let mut options: WindowOptions = WindowOptions::default();
+    let mut pixels = {
+        let window_size = window.inner_size();
+        let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, &window);
+        Pixels::new(WIDTH, HEIGHT, surface_texture)?
+    };
 
-    options.borderless = false;
+    let mut buffer: Buffer = Buffer::new(
+        vec![0; (4 * WIDTH * HEIGHT) as usize],
+        Font::new("tamzen-12.bdf"),
+    );
 
-    let mut window = Window::new("pogging my pants", WIDTH, HEIGHT, options).unwrap_or_else(|e| {
+    buffer.clone().defaultfont.shape_char('8');
+
+    /*let mut window = Window::new("pogging my pants", WIDTH, HEIGHT, WindowOptions::default()).unwrap_or_else(|e| {
         panic!("{}", e);
     });
 
     // Limit to max ~60 fps update rate
-    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));*/
 
     let mut time = Instant::now();
 
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        /*for (pixel, i) in buffer.into_vec_mut().iter_mut().enumerate() {
-            *i = from_u8_rgb(0xff, 0x80, pixel as u8);
-        }*/
+    //println!("{}, {}", buffer.buf.len(), pixels.get_frame().len());
 
-        
-        buffer.draw();        
-        buffer.draw_text(&Instant::now().duration_since(time).as_millis().to_string(), buffer.defaultfont.clone(), 10, 10, [0xff; 3]);
+    event_loop.run(move |event, _, control_flow| {
+        if let Event::RedrawRequested(_) = event {
+            buffer.draw();
+            buffer.draw_text(&Instant::now().duration_since(time).as_millis().to_string(), buffer.defaultfont.clone(), 5, 5, [0xff; 3]);
+            time = Instant::now();
+            pixels
+                .get_frame()
+                .copy_from_slice(buffer.into_vec_mut().as_slice());
 
-        time = Instant::now();
-        
-        // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
-        window
-            .update_with_buffer(&buffer.into_vec_mut(), WIDTH, HEIGHT)
-            .unwrap();
-        
-    }
-    Ok(())
+            if pixels
+                .render()
+                .map_err(|e| error!("pixels.render() failed: {}", e))
+                .is_err()
+            {
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
+        }
+
+        if input.update(&event) {
+            if input.key_pressed(VirtualKeyCode::Escape) || input.quit() {
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
+        }
+
+        window.request_redraw();
+    });
 }

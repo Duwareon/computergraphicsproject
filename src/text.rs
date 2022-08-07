@@ -2,49 +2,35 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 
+// fn find_contains(vector: &Vec<String>, search: &str) -> (usize, String) {
+//     let i = vector.into_iter().position(|r| r == search).unwrap();
+//     let j = &vector[i];
+//     return (i, j.to_string());
+// }
 
-fn find_contains(vector: &Vec<String>, search: &str) -> (usize, String) {
-    let i = vector.into_iter().position(|r| r == search).unwrap();
-    let j = &vector[i];
-    return (i, j.to_string());
-}
-
-fn convert_to_binary_from_hex(hex: &str) -> String {
-    hex.chars().map(to_binary).collect()
-}
-
-fn to_binary(c: char) -> &'static str {
-    match c {
-        '0' => "0000",
-        '1' => "0001",
-        '2' => "0010",
-        '3' => "0011",
-        '4' => "0100",
-        '5' => "0101",
-        '6' => "0110",
-        '7' => "0111",
-        '8' => "1000",
-        '9' => "1001",
-        'A' => "1010",
-        'B' => "1011",
-        'C' => "1100",
-        'D' => "1101",
-        'E' => "1110",
-        'F' => "1111",
-        _ => "",
-    }
-}
+// fn push_to_index(i: usize, val: u8, x: &mut Vec<u8>) {
+// 	loop {
+// 		if x.len() < i {
+// 			x.push(0);
+// 		}
+// 		else {
+// 			x.push(val);
+// 			break;
+// 		}
+// 	}
+// }
 
 #[derive(Clone)]
 pub struct Font {
     sourcefile: Vec<String>,
-    // properties: FontProperties,
+    // characters: Vec<Glyph>,
 }
 
+// TODO: Make this index all characters on startup, easiest way is probably to just make a vec that takes a codepoint and has that correlate to the linenumber for the BITMAP
 impl Font {
-    pub fn new(sourcefile: Vec<String>) -> Self {
+    pub fn new(sourcefile: &str) -> Self {
         Font {
-            sourcefile: sourcefile,
+            sourcefile: Font::format(sourcefile),
         }
     }
 
@@ -65,67 +51,55 @@ impl Font {
     }
 
     // Returns a bitmap of the requested char,
-    pub fn shape_char(self, glyph: char) -> Vec<String> {
-        let file = self.sourcefile;
+    pub fn shape_char(self, glyph: char) -> Vec<[u16; 2]> {
+        let mut found_encoding = false;
+        let searchstr: &str = &("ENCODING ".to_owned() + &(glyph as u8).to_string());
+        let mut bitmaploc: usize = 0;
+        let mut bitmap: Vec<[u16; 2]> = vec![];
 
-        // Find the requested character inside of the .BDF font file
-        let search = find_contains(
-            &file,
-            &vec!["ENCODING", &(glyph as u32).to_string()].join(" "),
-        );
-        let linenum = search.0;
+        // Find where the bitmap info is in the font file
+        for (line, text) in self.sourcefile.clone().into_iter().enumerate() {
+            match text.as_str() {
+                y if y == searchstr => found_encoding = true,
 
-        // Get the needed bitmap information
-        let mut i: u32 = 0;
-        let mut bitarray: Vec<&str> = vec![];
-
-        loop {
-            i += 1;
-            let mut currentline = linenum + i as usize;
-            let line: &str = file[currentline].as_ref();
-            let word: &str = line.split(" ").nth(0).unwrap();
-
-            match word {
-                /*"SWIDTH" => {
-                    swidth = tokenize(line).try_into().unwrap();
-                }
-
-                "DWIDTH" => {
-                    dwidth = tokenize(line).try_into().unwrap();
-                }
-
-                "BBX" => {
-                    bbx = tokenize(line).try_into().unwrap();
-                }*/
                 "BITMAP" => {
-                    loop {
-                        i += 1;
-                        currentline = linenum + i as usize;
-                        let line: &str = file[currentline].as_ref();
-                        let word: &str = line.split(" ").nth(0).unwrap();
-
-                        match word {
-                            "BITMAP" => continue,
-                            "ENDCHAR" => break,
-                            &_ => bitarray.append(&mut vec![line]),
-                        }
+                    if found_encoding {
+                        bitmaploc = line + 1;
+                        break;
                     }
-                    break;
                 }
-                &_ => continue,
+                _ => continue,
             }
         }
 
-        let mut chararray: Vec<String> = vec![];
-
-        for i in bitarray {
-            chararray.append(&mut vec![convert_to_binary_from_hex(i)]);
+        let mut y = 0;
+        // Loop through the lines of the BITMAP
+        loop {
+            let linenum = bitmaploc + y;
+            let line: &str = &self.sourcefile[linenum].to_owned();
+            match line {
+                "ENDCHAR" => break,
+                line => {
+                    let lineint = i64::from_str_radix(line, 16).unwrap();
+                    let binstring = format!("{:08b}", lineint);
+                    // Loop through the binary digits of the line
+                    for (x, j) in binstring.chars().enumerate() {
+                        if j == '1' {
+                            bitmap.append(&mut vec![[x as u16, y as u16]]);
+                        }
+                    }
+                }
+            }
+            y += 1;
         }
-
-        return chararray;
+        return bitmap;
     }
 }
 
-/*pub struct FontProperties {
-
-}*/
+// #[derive(Clone)]
+// pub struct Glyph {
+//     swidth: [u16; 2],
+//     dwidth: [u16; 2],
+//     bbx: [u16; 4],
+//     bitmap: Vec<String>,
+// }
