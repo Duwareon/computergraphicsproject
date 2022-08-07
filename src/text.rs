@@ -30,11 +30,11 @@ pub struct Font {
 impl Font {
     pub fn new(sourcefile: &str) -> Self {
         Font {
-            sourcefile: Font::format(sourcefile),
+            sourcefile: Font::format_file(sourcefile),
         }
     }
 
-    pub fn format(filelocation: &str) -> Vec<String> {
+    pub fn format_file(filelocation: &str) -> Vec<String> {
         let file = File::open(filelocation).unwrap();
         let mut buf_reader = BufReader::new(file);
         let mut contents = String::new();
