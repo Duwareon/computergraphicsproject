@@ -8,29 +8,33 @@ use std::io::BufReader;
 //     return (i, j.to_string());
 // }
 
-// fn push_to_index(i: usize, val: u8, x: &mut Vec<u8>) {
-// 	loop {
-// 		if x.len() < i {
-// 			x.push(0);
-// 		}
-// 		else {
-// 			x.push(val);
-// 			break;
-// 		}
-// 	}
-// }
-
 #[derive(Clone)]
 pub struct Font {
     sourcefile: Vec<String>,
-    // characters: Vec<Glyph>,
+    cache: Vec<Vec<[u16; 2]>>,
 }
 
-// TODO: Make this index all characters on startup, easiest way is probably to just make a vec that takes a codepoint and has that correlate to the linenumber for the BITMAP
 impl Font {
     pub fn new(sourcefile: &str) -> Self {
         Font {
             sourcefile: Font::format_file(sourcefile),
+            cache: vec!(),
+        }
+    }
+
+    pub fn cacheglyph(&mut self, glyph: char) {
+        let index = glyph.clone() as usize;
+        loop {
+            // println!("{}, {:?}", self.cache.len(), index);
+            
+            if self.cache.len() < index+1 {
+                self.cache.push(vec![[0u16; 2]]);
+            }
+            else {
+                self.cache[index] = vec![[1u16; 2]];
+                self.cache[index] = self.clone().shape_char(glyph);
+                break;
+            }
         }
     }
 
@@ -51,47 +55,62 @@ impl Font {
     }
 
     // Returns a bitmap of the requested char,
-    pub fn shape_char(self, glyph: char) -> Vec<[u16; 2]> {
+    pub fn shape_char(&mut self, glyph: char) -> Vec<[u16; 2]> {
         let mut found_encoding = false;
         let searchstr: &str = &("ENCODING ".to_owned() + &(glyph as u8).to_string());
         let mut bitmaploc: usize = 0;
         let mut bitmap: Vec<[u16; 2]> = vec![];
 
-        // Find where the bitmap info is in the font file
-        for (line, text) in self.sourcefile.clone().into_iter().enumerate() {
-            match text.as_str() {
-                y if y == searchstr => found_encoding = true,
+        let mut cachehasglyph = self.cache.len() > glyph as usize;
 
-                "BITMAP" => {
-                    if found_encoding {
-                        bitmaploc = line + 1;
-                        break;
-                    }
-                }
-                _ => continue,
+        if cachehasglyph {
+            if self.cache[glyph as usize] == vec![[0, 0]] {
+                cachehasglyph = false
             }
         }
 
-        let mut y = 0;
-        // Loop through the lines of the BITMAP
-        loop {
-            let linenum = bitmaploc + y;
-            let line: &str = &self.sourcefile[linenum].to_owned();
-            match line {
-                "ENDCHAR" => break,
-                line => {
-                    let lineint = i64::from_str_radix(line, 16).unwrap();
-                    let binstring = format!("{:08b}", lineint);
-                    // Loop through the binary digits of the line
-                    for (x, j) in binstring.chars().enumerate() {
-                        if j == '1' {
-                            bitmap.append(&mut vec![[x as u16, y as u16]]);
+        if !cachehasglyph {
+            // Find where the bitmap info is in the font file
+            for (line, text) in self.sourcefile.clone().into_iter().enumerate() {
+                match text.as_str() {
+                    y if y == searchstr => found_encoding = true,
+
+                    "BITMAP" => {
+                        if found_encoding {
+                            bitmaploc = line + 1;
+                            break;
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+
+            let mut y = 0;
+            // Loop through the lines of the BITMAP
+            loop {
+                let linenum = bitmaploc + y;
+                let line: &str = &self.sourcefile[linenum].to_owned();
+                match line {
+                    "ENDCHAR" => break,
+                    line => {
+                        let lineint = i64::from_str_radix(line, 16).unwrap();
+                        let binstring = format!("{:08b}", lineint);
+                        // Loop through the binary digits of the line
+                        for (x, j) in binstring.chars().enumerate() {
+                            if j == '1' {
+                                bitmap.append(&mut vec![[x as u16, y as u16]]);
+                            }
                         }
                     }
                 }
+                y += 1;
             }
-            y += 1;
+            self.cacheglyph(glyph)
         }
+        else {
+            bitmap = self.cache[glyph as usize].clone();
+        }
+        
         return bitmap;
     }
 }
